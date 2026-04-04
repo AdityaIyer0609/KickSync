@@ -294,11 +294,11 @@ export default function Home() {
                 </p>
                 <div className="w-6 h-[2px] bg-green-400 rounded-full" />
               </div>
+              <p className="text-xs text-gray-500 mb-3">Based on last 5 results across all competitions</p>
               {inForm.length > 0 ? inForm.map((t, i) => (
                 <div key={i} className="flex justify-between mb-2">
                   <div>
                     <p className="text-sm">{t.team}</p>
-                    <p className="text-xs text-gray-500">{t.league}</p>
                   </div>
                   <div className="flex gap-1">
                     {t.form.split("").map((r: string, j: number) => (
