@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
 import ReactMarkdown from "react-markdown";
-import { StatCardSkeleton, MatchCardSkeleton } from "./components/Skeleton";
+import { StatCardSkeleton, NewsCardSkeleton, MatchCardGridSkeleton, SpotlightSkeleton } from "./components/Skeleton";
 
 const IconChevronLeft = () => (
   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -174,12 +174,12 @@ export default function Home() {
         </div>
 
         {/* LATEST NEWS */}
-        {news.length > 0 && (
-          <section className="mt-10 sm:mt-80">
-            <div className="mb-6">
-              <h2 className="text-2xl font-semibold tracking-tight text-white">Latest News</h2>
-              <div className="w-12 h-[2px] bg-gradient-to-r from-green-400 to-transparent mt-2" />
-            </div>
+        <section className="mt-10 sm:mt-80">
+          <div className="mb-6">
+            <h2 className="text-2xl font-semibold tracking-tight text-white">Latest News</h2>
+            <div className="w-12 h-[2px] bg-gradient-to-r from-green-400 to-transparent mt-2" />
+          </div>
+          {news.length > 0 ? (
             <Gallery speed="slow" itemWidth={304} height={280}>
               {news.map((article, i) => (
                 <a
@@ -206,8 +206,12 @@ export default function Home() {
                 </a>
               ))}
             </Gallery>
-          </section>
-        )}
+          ) : (
+            <div className="flex gap-4 overflow-hidden" style={{ height: 280 }}>
+              {[1,2,3,4].map(i => <NewsCardSkeleton key={i} />)}
+            </div>
+          )}
+        </section>
 
         {/* RECENT MATCHES */}
         <section>
@@ -275,9 +279,7 @@ export default function Home() {
               ))}
             </div>
           ) : (
-            <div className="text-gray-400 text-sm">
-              <MatchCardSkeleton />
-            </div>
+            <MatchCardGridSkeleton />
           )}
         </section>
 
@@ -292,7 +294,7 @@ export default function Home() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
 
             {/* In-form */}
-            <div className="bg-[#0f1923] border border-white/10 p-4 rounded-xl shadow-xl shadow-black/40">
+            <div className="bg-[#0f1923] border border-white/10 p-4 rounded-xl shadow-xl shadow-black/40 min-h-[280px]">
               <div className="flex items-center justify-between mb-4">
                 <p className="text-sm font-semibold text-white tracking-wide">
                   Most In-Form Teams
@@ -320,7 +322,7 @@ export default function Home() {
             </div>
 
             {/* Best defense */}
-            <div className="bg-[#0f1923] border border-white/10 p-4 rounded-xl shadow-xl shadow-black/40">
+            <div className="bg-[#0f1923] border border-white/10 p-4 rounded-xl shadow-xl shadow-black/40 min-h-[280px]">
               <div className="flex items-center justify-between mb-4">
                 <p className="text-sm font-semibold text-white tracking-wide">
                   Best Defence
@@ -339,7 +341,7 @@ export default function Home() {
             </div>
 
             {/* Best Offense */}
-            <div className="bg-[#0f1923] border border-white/10 p-4 rounded-xl shadow-xl shadow-black/40">
+            <div className="bg-[#0f1923] border border-white/10 p-4 rounded-xl shadow-xl shadow-black/40 min-h-[280px]">
               <div className="flex items-center justify-between mb-4">
                 <p className="text-sm font-semibold text-white tracking-wide">
                   Best Attack
@@ -368,7 +370,11 @@ export default function Home() {
             </h2>
             <div className="w-12 h-[2px] bg-gradient-to-r from-green-400 to-transparent mt-2" />
           </div>
-          {spotlight && (
+          {!spotlight ? (
+            <div className="bg-[#0f1923] border border-white/10 rounded-2xl p-4 sm:p-6 shadow-xl shadow-black/40">
+              <SpotlightSkeleton />
+            </div>
+          ) : (
             <div className="bg-[#0f1923] border border-white/10 rounded-2xl p-4 sm:p-6 shadow-xl shadow-black/40 flex flex-col sm:flex-row gap-4 sm:gap-6 items-start">
               {spotlight.photo && (
                 <img
@@ -397,8 +403,6 @@ export default function Home() {
             </div>
           )}
         </section>
-
-        {/* ICONIC MOMENTS */}
         <section>
           <div className="mb-6">
             <h2 className="text-2xl font-semibold tracking-tight text-white">Iconic Moments</h2>

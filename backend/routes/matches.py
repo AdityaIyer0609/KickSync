@@ -59,23 +59,61 @@ def get_league_teams(league_id: int, season: int = 2023):
     ]
 
 
+ESPN_ALL_SLUGS = {
+    **ESPN_LEAGUE_MAP,
+    # Cups
+    39001: "eng.fa", 39002: "eng.league_cup",
+    140001: "esp.copa_del_rey",
+    135001: "ita.coppa_italia",
+    78001: "ger.dfb_pokal",
+    61001: "fra.coupe_de_france",
+    2001: "uefa.europa", 2002: "uefa.europa.conf",
+}
+
+SLUG_NAMES = {
+    "eng.1": "Premier League", "esp.1": "La Liga", "ita.1": "Serie A",
+    "ger.1": "Bundesliga", "fra.1": "Ligue 1", "uefa.champions": "Champions League",
+    "eng.fa": "FA Cup", "eng.league_cup": "League Cup",
+    "esp.copa_del_rey": "Copa del Rey", "ita.coppa_italia": "Coppa Italia",
+    "ger.dfb_pokal": "DFB Pokal", "fra.coupe_de_france": "Coupe de France",
+    "uefa.europa": "Europa League", "uefa.europa.conf": "Conference League",
+}
+
+CUP_SLUGS_BY_LEAGUE = {
+    39: ["eng.fa", "eng.league_cup"],
+    140: ["esp.copa_del_rey"],
+    135: ["ita.coppa_italia"],
+    78: ["ger.dfb_pokal"],
+    61: ["fra.coupe_de_france"],
+    2: ["uefa.europa", "uefa.europa.conf"],
+}
+
 @router.get("/team-matches/{team_id}")
 def get_team_matches(team_id: int, season: int = 2024, limit: int = 5, offset: int = 0):
-    # Find which league this team belongs to by trying each
-    espn_slug = None
-    for slug in ESPN_LEAGUE_MAP.values():
+    # Find which league this team belongs to
+    league_slug = None
+    league_events = []
+    for league_id, slug in ESPN_LEAGUE_MAP.items():
         r = requests.get(f"{ESPN_BASE}/{slug}/teams/{team_id}/schedule?season={season}")
         if r.status_code == 200 and r.json().get("events"):
-            espn_slug = slug
-            events = r.json()["events"]
+            league_slug = slug
+            league_events = [(e, slug) for e in r.json()["events"]]
             break
 
-    if not espn_slug:
+    if not league_slug:
         return {"matches": [], "hasMore": False}
 
-    # Filter to finished matches only, sort by date desc
+    # Also fetch cup matches for this league's country
+    league_id_found = next((lid for lid, s in ESPN_LEAGUE_MAP.items() if s == league_slug), None)
+    cup_slugs = CUP_SLUGS_BY_LEAGUE.get(league_id_found, [])
+    for cup_slug in cup_slugs:
+        r = requests.get(f"{ESPN_BASE}/{cup_slug}/teams/{team_id}/schedule?season={season}")
+        if r.status_code == 200 and r.json().get("events"):
+            league_events += [(e, cup_slug) for e in r.json()["events"]]
+
+    # Filter to finished matches only
     finished = []
-    for e in events:
+    for e, slug in league_events:
         comp = e.get("competitions", [{}])[0]
         status = comp.get("status", {}).get("type", {}).get("name", "")
         if status != "STATUS_FULL_TIME":
@@ -89,9 +127,9 @@ def get_team_matches(team_id: int, season: int = 2024, limit: int = 5, offset: i
         away_score = away.get("score", {})
         finished.append({
             "fixture_id": e["id"],
-            "espn_slug": espn_slug,
+            "espn_slug": slug,
+            "competition": SLUG_NAMES.get(slug, slug),
             "date": e["date"],
-            "round": e.get("season", {}).get("slug", ""),
             "home": home["team"]["displayName"],
             "home_logo": home["team"].get("logos", [{}])[0].get("href", "") if home["team"].get("logos") else "",
             "away": away["team"]["displayName"],
@@ -103,8 +141,16 @@ def get_team_matches(team_id: int, season: int = 2024, limit: int = 5, offset: i
         })
 
     finished.sort(key=lambda m: m["date"], reverse=True)
-    total = len(finished)
-    page = finished[offset:offset + limit]
+    # Deduplicate by fixture_id
+    seen = set()
+    deduped = []
+    for m in finished:
+        if m["fixture_id"] not in seen:
+            seen.add(m["fixture_id"])
+            deduped.append(m)
+
+    total = len(deduped)
+    page = deduped[offset:offset + limit]
     return {
         "matches": page,
         "hasMore": offset + limit < total,
@@ -147,10 +193,16 @@ async def get_match_analysis(fixture_id: str, slug: str = ""):
 
     # If slug provided, try it directly first — much faster
     summary = None
+    espn_slug = slug or "esp.1"  # default fallback
+
     if slug:
-        r = requests.get(f"{ESPN_BASE}/{slug}/summary?event={fixture_id}", timeout=10)
-        if r.status_code == 200 and r.json().get("header"):
-            summary = r.json()
+        r = requests.get(f"{ESPN_BASE}/{slug}/scoreboard/{fixture_id}", timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            comp = data.get("competitions", [{}])[0]
+            if comp.get("competitors"):
+                summary = data
+                espn_slug = slug
 
     # Fallback: try all slugs concurrently
     if not summary:
@@ -161,24 +213,25 @@ async def get_match_analysis(fixture_id: str, slug: str = ""):
         ]
         async with httpx.AsyncClient() as client:
             tasks = [
-                client.get(f"{ESPN_BASE}/{s}/summary?event={fixture_id}", timeout=10)
+                client.get(f"{ESPN_BASE}/{s}/scoreboard/{fixture_id}", timeout=10)
                 for s in all_slugs
             ]
             responses = await asyncio.gather(*tasks, return_exceptions=True)
-        for r in responses:
+        for i, r in enumerate(responses):
             if isinstance(r, Exception) or r.status_code != 200:
                 continue
             data = r.json()
-            if data.get("header"):
+            if data.get("competitions", [{}])[0].get("competitors"):
                 summary = data
+                espn_slug = all_slugs[i]
                 break
 
     if not summary:
         return {"error": "Match not found"}
 
-    header = summary.get("header", {})
-    competitions = header.get("competitions", [{}])[0]
-    competitors = competitions.get("competitors", [])
+    # Parse from scoreboard format
+    comp = summary.get("competitions", [{}])[0]
+    competitors = comp.get("competitors", [])
     if len(competitors) < 2:
         return {"error": "Match data incomplete"}
 
@@ -188,166 +241,200 @@ async def get_match_analysis(fixture_id: str, slug: str = ""):
     away_team = away_comp["team"]["displayName"]
     home_score = int(home_comp.get("score", 0) or 0)
     away_score = int(away_comp.get("score", 0) or 0)
-    home_logo = home_comp["team"].get("logos", [{}])[0].get("href", "") if home_comp["team"].get("logos") else ""
-    away_logo = away_comp["team"].get("logos", [{}])[0].get("href", "") if away_comp["team"].get("logos") else ""
+    home_logo = home_comp["team"].get("logo", "")
+    away_logo = away_comp["team"].get("logo", "")
     score = {"home": home_score, "away": away_score}
-    match_date = competitions.get("date", "")
+    match_date = comp.get("date", summary.get("date", ""))
 
-    # Parse stats
+    # Parse stats from scoreboard competitors
     stats = {}
-    for team_data in summary.get("boxscore", {}).get("teams", []):
-        tn = team_data.get("team", {}).get("displayName", "")
-        stats[tn] = {s["label"]: s["displayValue"] for s in team_data.get("statistics", [])}
+    for c in competitors:
+        tn = c.get("team", {}).get("displayName", "")
+        stats[tn] = {s["name"]: s.get("displayValue", "—") for s in c.get("statistics", [])}
 
-    # Parse lineups + fetch coach from roster endpoint
+    # Map ESPN stat names to display labels
+    STAT_LABEL_MAP = {
+        "possessionPct": "Possession", "totalShots": "SHOTS",
+        "shotsOnTarget": "ON GOAL", "wonCorners": "Corner Kicks",
+        "foulsCommitted": "Fouls", "totalPasses": "Passes",
+    }
+    for tn in stats:
+        mapped = {}
+        for k, v in stats[tn].items():
+            label = STAT_LABEL_MAP.get(k, k)
+            mapped[label] = v
+        stats[tn] = mapped
+
+    # Goals and cards from details
+    goals, cards = [], []
+    home_id = str(home_comp.get("team", {}).get("id", ""))
+    away_id = str(away_comp.get("team", {}).get("id", ""))
+    for detail in comp.get("details", []):
+        minute = detail.get("clock", {}).get("displayValue", "")
+        athletes = detail.get("athletesInvolved", [])
+        player = athletes[0].get("displayName", "") if athletes else ""
+        team_id = str(detail.get("team", {}).get("id", ""))
+        team_name = home_team if team_id == home_id else away_team
+        if detail.get("scoringPlay"):
+            d = "Own Goal" if detail.get("ownGoal") else ("Penalty" if detail.get("penaltyKick") else "Goal")
+            goals.append({"minute": minute, "team": team_name, "player": player, "detail": d})
+        elif detail.get("yellowCard"):
+            cards.append({"minute": minute, "team": team_name, "player": player, "card": "Yellow Card"})
+        elif detail.get("redCard"):
+            cards.append({"minute": minute, "team": team_name, "player": player, "card": "Red Card"})
+
     lineups = {}
-    for roster in summary.get("rosters", []):
-        tn = roster.get("team", {}).get("displayName", "")
-        team_id = roster.get("team", {}).get("id", "")
-        formation = roster.get("formation", "")
-        starters = [p for p in roster.get("roster", []) if p.get("starter")]
+    subs = []
+    commentary_block = "No detailed play data available."
 
-        # Fetch coach from football-data.org using team name search
-        coach_name = None
-        if tn:
-            from utils import get_team_id
-            fd_team_id = get_team_id(tn)
-            if fd_team_id:
-                coach_res = requests.get(
-                    f"https://api.football-data.org/v4/teams/{fd_team_id}",
-                    headers=FD_HEADERS
-                )
-                if coach_res.status_code == 200:
-                    coach_data = coach_res.json().get("coach", {})
-                    if coach_data:
-                        coach_name = coach_data.get("name") or f"{coach_data.get('firstName', '')} {coach_data.get('lastName', '')}".strip()
+    # Fetch detailed stats + plays concurrently
+    core_base = f"https://sports.core.api.espn.com/v2/sports/soccer/leagues/{espn_slug}/events/{fixture_id}/competitions/{fixture_id}"
+    home_team_id = home_comp.get("team", {}).get("id", "")
+    away_team_id = away_comp.get("team", {}).get("id", "")
 
-        lineups[tn] = {
-            "formation": formation,
-            "startXI": [p["athlete"]["displayName"] for p in starters],
-            "coach": coach_name
-        }
+    async with httpx.AsyncClient() as client:
+        r_home_stats, r_away_stats, r_plays, r_home_roster, r_away_roster, r_home_site_roster, r_away_site_roster = await asyncio.gather(
+            client.get(f"{core_base}/competitors/{home_team_id}/statistics", timeout=8),
+            client.get(f"{core_base}/competitors/{away_team_id}/statistics", timeout=8),
+            client.get(f"{core_base}/plays?limit=300", timeout=8),
+            client.get(f"{core_base}/competitors/{home_team_id}/roster", timeout=8),
+            client.get(f"{core_base}/competitors/{away_team_id}/roster", timeout=8),
+            client.get(f"{ESPN_BASE}/{espn_slug}/teams/{home_team_id}/roster", timeout=8),
+            client.get(f"{ESPN_BASE}/{espn_slug}/teams/{away_team_id}/roster", timeout=8),
+            return_exceptions=True
+        )
 
-    # Fetch ALL plays for commentary + goals
-    goals, cards, subs = [], [], []
-    commentary_lines = []
+    def parse_core_stats(r):
+        if isinstance(r, Exception) or r.status_code != 200:
+            return {}
+        result = {}
+        for cat in r.json().get("splits", {}).get("categories", []):
+            for s in cat.get("stats", []):
+                result[s["displayName"]] = s.get("displayValue", "—")
+        return result
 
-    # Event types to KEEP for commentary (meaningful football events)
-    KEEP_TYPES = {
-        "goal", "penalty---scored", "own-goal",
-        "shot-on-target", "shot-off-target", "shot-hit-woodwork",
-        "save", "yellow-card", "red-card",
-        "corner-kick", "free-kick", "offside",
-        "substitution", "foul", "var"
-    }
-    # Types to SKIP (noise)
-    SKIP_TYPES = {
-        "kickoff", "halftime", "start-2nd-half", "end-period",
-        "assists-shot", "throw-in", "goal-kick"
-    }
+    detailed_home = parse_core_stats(r_home_stats)
+    detailed_away = parse_core_stats(r_away_stats)
 
-    plays_res = requests.get(
-        f"https://sports.core.api.espn.com/v2/sports/soccer/leagues/{espn_slug}/events/{fixture_id}/competitions/{fixture_id}/plays?limit=300"
-    )
-    if plays_res.status_code == 200:
-        for play in plays_res.json().get("items", []):
-            ptype = play.get("type", {}).get("type", "")
-            text = play.get("text", "")
-            clock = play.get("clock", {}).get("displayValue", "")
-            team_name = play.get("team", {}).get("displayName", "")
-            short = play.get("shortText", "")
+    # Merge detailed stats into stats dict
+    if detailed_home:
+        stats[home_team] = {**stats.get(home_team, {}), **detailed_home}
+    if detailed_away:
+        stats[away_team] = {**stats.get(away_team, {}), **detailed_away}
 
-            if ptype in SKIP_TYPES or not text:
+    # Parse rosters for lineups — cross-reference core roster (starter flags) with site roster (names)
+    def parse_roster(r_core, r_site):
+        if isinstance(r_core, Exception) or r_core.status_code != 200:
+            return {"formation": "", "startXI": [], "coach": None}
+        core_data = r_core.json()
+        formation = core_data.get("formation", {}).get("summary", "")
+
+        # Build id->name map from site roster
+        id_to_name = {}
+        if not isinstance(r_site, Exception) and r_site.status_code == 200:
+            for a in r_site.json().get("athletes", []):
+                id_to_name[str(a["id"])] = a.get("displayName", "")
+
+        import re as _re
+
+        # Collect $ref URLs for starters whose names we still need
+        missing_refs = []
+
+        starters = []
+        for e in core_data.get("entries", []):
+            if not e.get("starter"):
                 continue
 
-            # Extract goals
-            if ptype in ("goal", "penalty---scored"):
-                player = short.replace(" Goal", "").replace(" (OG)", "").strip() if short else ""
-                if not player and "." in text:
-                    after = text.split(".", 1)[1].strip()
-                    player = after.split("(")[0].strip() if "(" in after else after.split(" ")[0]
-                goals.append({"minute": clock, "team": team_name, "player": player, "detail": "Goal"})
-            elif ptype == "own-goal":
-                player = short.replace(" Own Goal", "").strip() if short else text.split(",")[0].replace("Own Goal by ", "").strip()
-                goals.append({"minute": clock, "team": team_name, "player": player, "detail": "Own Goal"})
-            elif ptype in ("yellow-card", "red-card"):
-                cards.append({"minute": clock, "team": team_name, "player": text.split("(")[0].strip(), "card": "Yellow Card" if ptype == "yellow-card" else "Red Card"})
-            elif ptype == "substitution":
+            # Try playerId first
+            pid = str(e.get("playerId", ""))
+            if pid and pid in id_to_name:
+                starters.append(id_to_name[pid])
+                continue
+
+            # Extract ID from athlete $ref URL
+            ref = e.get("athlete", {}).get("$ref", "")
+            aid = ""
+            if ref:
+                m = _re.search(r"/athletes/(\d+)", ref)
+                if m:
+                    aid = m.group(1)
+
+            if aid and aid in id_to_name:
+                starters.append(id_to_name[aid])
+            elif ref:
+                # Queue for async resolution
+                missing_refs.append((ref, len(starters)))
+                starters.append(None)  # placeholder
+
+        return {"formation": formation, "startXI": starters, "coach": None, "_missing_refs": missing_refs}
+
+    lineups[home_team] = parse_roster(r_home_roster, r_home_site_roster)
+    lineups[away_team] = parse_roster(r_away_roster, r_away_site_roster)
+
+    # Resolve any players whose names couldn't be found via site roster
+    async def resolve_missing(lineup: dict):
+        missing = lineup.pop("_missing_refs", [])
+        if not missing:
+            lineup["startXI"] = [p for p in lineup["startXI"] if p is not None]
+            return
+        async with httpx.AsyncClient() as client:
+            tasks = [client.get(ref, timeout=6) for ref, _ in missing]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        for (ref, idx), r in zip(missing, results):
+            name = None
+            if not isinstance(r, Exception) and r.status_code == 200:
+                name = r.json().get("displayName") or r.json().get("fullName")
+            lineup["startXI"][idx] = name
+        lineup["startXI"] = [p for p in lineup["startXI"] if p is not None]
+
+    await asyncio.gather(
+        resolve_missing(lineups[home_team]),
+        resolve_missing(lineups[away_team]),
+    )
+    commentary_lines = []
+    KEEP_TYPES = {"goal","penalty---scored","own-goal","shot-on-target","shot-off-target",
+                  "yellow-card","red-card","substitution","var"}
+    if not isinstance(r_plays, Exception) and r_plays.status_code == 200:
+        for play in r_plays.json().get("items", []):
+            ptype = play.get("type", {}).get("type", "")
+            text = play.get("text", "") or play.get("alternativeText", "")
+            clock = play.get("clock", {}).get("displayValue", "")
+            team_ref = play.get("team", {}).get("$ref", "")
+            team_name = home_team if str(home_team_id) in team_ref else away_team if str(away_team_id) in team_ref else ""
+            if ptype in KEEP_TYPES and text:
+                commentary_lines.append(f"{clock} [{team_name}] {text}")
+            if play.get("substitution"):
                 subs.append({"minute": clock, "team": team_name, "detail": text})
 
-            # Build commentary for LLM — keep meaningful events
-            if ptype in KEEP_TYPES and text and "assists shot" not in text.lower():
-                team_label = f"[{team_name}]" if team_name else ""
-                commentary_lines.append(f"{clock} {team_label} {text}")
+    commentary_block = "\n".join(commentary_lines[:80]) if commentary_lines else "No detailed play data available."
 
     home_stats = stats.get(home_team, {})
     away_stats = stats.get(away_team, {})
 
-    # Build starters string with positions
-    def format_lineup(team_name):
-        roster_data = next((r for r in summary.get("rosters", []) if r.get("team", {}).get("displayName") == team_name), {})
-        starters = [p for p in roster_data.get("roster", []) if p.get("starter")]
-        return ", ".join(
-            f"{p['athlete']['displayName']} ({p.get('position', {}).get('abbreviation', '?')})"
-            for p in starters
-        )
+    system_prompt = """You are an elite football analyst. Write a concise tactical match report in flowing prose."""
 
-    home_xi = format_lineup(home_team)
-    away_xi = format_lineup(away_team)
+    prompt = f"""MATCH: {home_team} {home_score} – {away_score} {away_team} ({match_date[:10] if match_date else 'N/A'})
 
-    # Build commentary block — cap at 80 most meaningful lines to stay within token budget
-    commentary_block = "\n".join(commentary_lines[:80]) if commentary_lines else "No detailed play data available."
+STATISTICS:
+Possession: {home_stats.get('Possession %', home_stats.get('possessionPct', '—'))} vs {away_stats.get('Possession %', away_stats.get('possessionPct', '—'))}
+Shots: {home_stats.get('Shots', home_stats.get('totalShots', '—'))} vs {away_stats.get('Shots', away_stats.get('totalShots', '—'))}
+On Target: {home_stats.get('Shots on Target', home_stats.get('shotsOnTarget', '—'))} vs {away_stats.get('Shots on Target', away_stats.get('shotsOnTarget', '—'))}
+Tackles Won: {home_stats.get('Tackles Won', home_stats.get('effectiveTackles', '—'))} vs {away_stats.get('Tackles Won', away_stats.get('effectiveTackles', '—'))}
+Interceptions: {home_stats.get('Interceptions', '—')} vs {away_stats.get('Interceptions', '—')}
+Corners: {home_stats.get('Corner Kicks', home_stats.get('wonCorners', '—'))} vs {away_stats.get('Corner Kicks', away_stats.get('wonCorners', '—'))}
+Fouls: {home_stats.get('Fouls', home_stats.get('foulsCommitted', '—'))} vs {away_stats.get('Fouls', away_stats.get('foulsCommitted', '—'))}
 
-    system_prompt = """You are an elite football analyst writing a match report.
-CRITICAL RULE: You may ONLY describe actions that are explicitly stated in the PLAY-BY-PLAY EVENTS section.
-If the play-by-play says "right footed shot from the centre of the box" — use that exact description naturally in your sentence WITHOUT quotation marks. Do NOT say "header" if the data says "shot". Do NOT invent assists, body parts, or descriptions not in the data.
-Write in flowing prose — never use quotation marks around play descriptions.
-Use football terminology naturally but stay strictly within what the data shows."""
+GOALS: {chr(10).join(f"{g['minute']} {g['player']} ({g['team']}) — {g['detail']}" for g in goals) if goals else 'None'}
+CARDS: {chr(10).join(f"{c['minute']} {c['player']} ({c['team']}) — {c['card']}" for c in cards) if cards else 'None'}
 
-    prompt = f"""MATCH REPORT REQUEST
-
-{home_team} {home_score} – {away_score} {away_team}
-Date: {match_date[:10] if match_date else 'N/A'}
-
-=== FORMATIONS & LINEUPS ===
-{home_team} ({lineups.get(home_team, {}).get('formation', 'N/A')}): {home_xi}
-{away_team} ({lineups.get(away_team, {}).get('formation', 'N/A')}): {away_xi}
-
-=== MATCH STATISTICS ===
-                        {home_team:<30} {away_team}
-Possession:             {home_stats.get('Possession', '—'):<30} {away_stats.get('Possession', '—')}
-Shots:                  {home_stats.get('SHOTS', '—'):<30} {away_stats.get('SHOTS', '—')}
-Shots on Target:        {home_stats.get('ON GOAL', '—'):<30} {away_stats.get('ON GOAL', '—')}
-Passes:                 {home_stats.get('Passes', '—'):<30} {away_stats.get('Passes', '—')}
-Pass Accuracy:          {home_stats.get('Pass Completion %', '—'):<30} {away_stats.get('Pass Completion %', '—')}
-Corners:                {home_stats.get('Corner Kicks', '—'):<30} {away_stats.get('Corner Kicks', '—')}
-Fouls:                  {home_stats.get('Fouls', '—'):<30} {away_stats.get('Fouls', '—')}
-Tackles:                {home_stats.get('Effective Tackles', '—'):<30} {away_stats.get('Effective Tackles', '—')}
-Crosses:                {home_stats.get('Accurate Crosses', '—'):<30} {away_stats.get('Accurate Crosses', '—')}
-
-=== GOALS ===
-{chr(10).join(f"{g['minute']} {g['player']} ({g['team']}) — {g['detail']}" for g in goals) if goals else 'No goals'}
-
-=== CARDS ===
-{chr(10).join(f"{c['minute']} {c['player']} ({c['team']}) — {c['card']}" for c in cards) if cards else 'No cards'}
-
-=== PLAY-BY-PLAY EVENTS ===
+KEY EVENTS:
 {commentary_block}
 
-=== YOUR TASK ===
-IMPORTANT: For every specific action you describe (shots, goals, assists, saves), use the EXACT wording from the PLAY-BY-PLAY EVENTS above. Do not paraphrase shot types — if it says "right footed shot", say "right footed shot", not "header" or "volley".
-
-Write a tactical match analysis with these sections:
-**Match Overview** — 3-4 bullet points on the overall flow, possession patterns, and which team controlled the game
-**Key Tactical Battles** — 2-3 bullet points describing patterns you can see in the play-by-play data (e.g. which zones had most fouls, which team won more corners, pressing patterns visible from foul locations). Do NOT describe player roles or positions unless the play-by-play explicitly states them
-**Turning Points** — 2-3 bullet points ONLY on moments that changed the tactical dynamic of the match (e.g. a red card forcing a team to sit deeper, a substitution that changed the game, a goal that forced the losing team to abandon their defensive shape and chase the game). Do NOT list every goal — only moments that caused a tactical shift
-**Verdict** — 1-2 sentences on why this result happened
-
-Rules:
-- Every claim must be supported by the play-by-play data above
-- Use player names from the lineups when describing actions
-- Be specific about minutes, zones, and patterns you can see in the data
-- Do NOT use ### headers, use **bold** headings only"""
+Write:
+**Match Overview** — 3-4 bullets on flow and control
+**Key Tactical Battles** — 2-3 bullets on patterns from the data
+**Turning Points** — 2-3 bullets on moments that changed the game
+**Verdict** — 1-2 sentences on why this result happened"""
 
     try:
         analysis = chat(prompt, system=system_prompt, max_tokens=1500)

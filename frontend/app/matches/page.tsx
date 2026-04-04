@@ -169,6 +169,9 @@ export default function MatchesPage() {
                 >
                   <p className="text-xs text-gray-600 mb-3">
                     {new Date(m.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                    {m.competition && m.competition !== "Premier League" && m.competition !== "La Liga" && m.competition !== "Serie A" && m.competition !== "Bundesliga" && m.competition !== "Ligue 1" && m.competition !== "Champions League"
+                      ? <span className="ml-2 text-green-400/80">· {m.competition}</span>
+                      : null}
                   </p>
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-2 flex-1">

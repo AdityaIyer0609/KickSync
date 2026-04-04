@@ -40,14 +40,14 @@ export default function MatchPage() {
     const url = slug ? `${API}/match/${id}?slug=${slug}` : `${API}/match/${id}`;
     fetch(url)
       .then((r) => r.json())
-      .then((d) => { setData(d); setLoading(false); })
+      .then((d) => { setData(d); setLoading(false); window.scrollTo({ top: 0 }); })
       .catch(() => setLoading(false));
   }, [id]);
 
   if (loading) return (
     <div className="relative min-h-screen text-white">
       <div className="parallax-bg" />
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="relative max-w-4xl mx-auto px-4 pt-24 pb-20">
         <div className="text-center text-gray-400">
           <div className="w-8 h-8 border-2 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
           <p className="text-sm">Loading match analysis...</p>
@@ -59,7 +59,7 @@ export default function MatchPage() {
   if (!data || data.error) return (
     <div className="relative min-h-screen text-white">
       <div className="parallax-bg" />
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="relative max-w-4xl mx-auto px-4 pt-24 pb-20">
         <p className="text-gray-400">Match not found</p>
       </div>
     </div>
@@ -71,7 +71,7 @@ export default function MatchPage() {
   return (
     <div className="relative min-h-screen text-white">
       <div className="parallax-bg" />
-      <div className="relative max-w-4xl mx-auto px-4 pt-4 pb-20">
+      <div className="relative max-w-4xl mx-auto px-4 pt-20 pb-20">
 
         {/* Back */}
         <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-400 hover:text-white text-sm mb-6 transition">
@@ -88,7 +88,6 @@ export default function MatchPage() {
               {data.homeLogo && <img src={data.homeLogo} alt={homeTeam} className="w-12 h-12 sm:w-16 sm:h-16 object-contain mx-auto mb-2 sm:mb-3 bg-white rounded-xl p-1.5" />}
               <p className="text-sm sm:text-lg font-bold leading-tight">{homeTeam}</p>
               <p className="text-gray-500 text-xs mt-1 hidden sm:block">{data.lineups?.[homeTeam]?.formation}</p>
-              <p className="text-gray-600 text-xs hidden sm:block">{data.lineups?.[homeTeam]?.coach}</p>
             </div>
             <div className="text-center px-2 sm:px-4 flex-shrink-0">
               <p className="text-3xl sm:text-5xl font-black tabular-nums">{data.score.home} – {data.score.away}</p>
@@ -98,7 +97,6 @@ export default function MatchPage() {
               {data.awayLogo && <img src={data.awayLogo} alt={awayTeam} className="w-12 h-12 sm:w-16 sm:h-16 object-contain mx-auto mb-2 sm:mb-3 bg-white rounded-xl p-1.5" />}
               <p className="text-sm sm:text-lg font-bold leading-tight">{awayTeam}</p>
               <p className="text-gray-500 text-xs mt-1 hidden sm:block">{data.lineups?.[awayTeam]?.formation}</p>
-              <p className="text-gray-600 text-xs hidden sm:block">{data.lineups?.[awayTeam]?.coach}</p>
             </div>
           </div>
           {/* Formation/coach below on mobile */}
@@ -111,10 +109,10 @@ export default function MatchPage() {
         {/* Stats */}
         {data.stats && Object.keys(data.stats).length > 0 && (() => {
           const statRows = [
-            "Possession", "SHOTS", "ON GOAL", "Corner Kicks",
-            "Fouls", "Offsides", "Passes", "Pass Completion %",
-            "Yellow Cards", "Accurate Passes", "Blocked Shots",
-            "Effective Tackles", "Interceptions"
+            "Possession Percentage", "Shots", "Shots On Target", "Corners Won",
+            "Fouls Committed", "Tackles Won", "Interceptions",
+            "Passes", "Pass Percentage", "Yellow Cards",
+            "Shots Blocked", "Clearances", "Saves",
           ];
           return (
             <div className="bg-[#0f1923] border border-white/10 rounded-2xl p-5 mb-6">
@@ -123,9 +121,16 @@ export default function MatchPage() {
                 {statRows.map((stat) => {
                   const hv = data.stats[homeTeam]?.[stat] ?? "—";
                   const av = data.stats[awayTeam]?.[stat] ?? "—";
-                  const isPercent = stat === "Possession" || stat === "Pass Completion %";
+                  const isPercent = stat === "Possession Percentage" || stat === "Pass Percentage";
                   const hvDisplay = hv !== "—" && isPercent ? `${hv}%` : hv;
                   const avDisplay = av !== "—" && isPercent ? `${av}%` : av;
+                  const label = stat === "Possession Percentage" ? "Possession %" 
+                    : stat === "Pass Percentage" ? "Pass %" 
+                    : stat === "Fouls Committed" ? "Fouls"
+                    : stat === "Corners Won" ? "Corners"
+                    : stat === "Shots On Target" ? "Shots on Target"
+                    : stat === "Shots Blocked" ? "Blocked Shots"
+                    : stat;
                   const hNum = parseFloat(String(hv)) || 0;
                   const aNum = parseFloat(String(av)) || 0;
                   const total = hNum + aNum || 1;
@@ -134,7 +139,7 @@ export default function MatchPage() {
                     <div key={stat}>
                       <div className="flex justify-between text-sm mb-1.5">
                         <span className="font-semibold text-white w-12">{hvDisplay}</span>
-                        <span className="text-gray-500 text-xs">{stat}</span>
+                        <span className="text-gray-500 text-xs">{label}</span>
                         <span className="font-semibold text-white w-12 text-right">{avDisplay}</span>
                       </div>
                       <div className="flex h-1 rounded-full overflow-hidden bg-white/5">

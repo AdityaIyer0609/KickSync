@@ -55,3 +55,40 @@ export function SpotlightSkeleton() {
     </div>
   );
 }
+
+export function NewsCardSkeleton() {
+  return (
+    <div className="flex-shrink-0 w-72 rounded-xl overflow-hidden bg-[#0f1923] border border-white/10 mr-4">
+      <div className="w-full h-40 bg-white/10 animate-pulse" />
+      <div className="p-3 space-y-2">
+        <SkeletonLine width="w-full" height="h-3" />
+        <SkeletonLine width="w-4/5" height="h-3" />
+        <SkeletonLine width="w-1/3" height="h-2" />
+      </div>
+    </div>
+  );
+}
+
+export function MatchCardGridSkeleton() {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+      {[1, 2, 3, 4, 5, 6].map((i) => (
+        <div key={i} className="bg-[#0f1923] border border-white/10 rounded-2xl p-4 h-24 animate-pulse">
+          <div className="flex justify-between mb-3">
+            <SkeletonLine width="w-20" height="h-2" />
+            <SkeletonLine width="w-12" height="h-2" />
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-full bg-white/10" />
+            <SkeletonLine width="w-24" height="h-3" />
+            <div className="flex-1" />
+            <SkeletonLine width="w-10" height="h-5" />
+            <div className="flex-1" />
+            <SkeletonLine width="w-24" height="h-3" />
+            <div className="w-6 h-6 rounded-full bg-white/10" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
