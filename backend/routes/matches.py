@@ -1,4 +1,6 @@
 import requests
+import asyncio
+import httpx
 from fastapi import APIRouter
 from config import API_KEY, API_FOOTBALL_KEY
 from llm import chat
@@ -141,16 +143,31 @@ def get_match_analysis(fixture_id: str):
                     "cached": True
                 }
     except Exception:
-        pass  # Cache miss or error — proceed normally
+        pass
 
-    espn_slug = None
+    # Try all slugs concurrently
+    all_slugs = list(ESPN_LEAGUE_MAP.values()) + [
+        "eng.fa", "eng.league_cup", "esp.copa_del_rey",
+        "ita.coppa_italia", "ger.dfb_pokal", "fra.coupe_de_france",
+        "uefa.europa", "uefa.europa.conf",
+    ]
+
+    async def fetch_all():
+        async with httpx.AsyncClient() as client:
+            tasks = [
+                client.get(f"{ESPN_BASE}/{slug}/summary?event={fixture_id}", timeout=8)
+                for slug in all_slugs
+            ]
+            return await asyncio.gather(*tasks, return_exceptions=True)
+
+    responses = asyncio.run(fetch_all())
     summary = None
-
-    for slug in ESPN_LEAGUE_MAP.values():
-        r = requests.get(f"{ESPN_BASE}/{slug}/summary?event={fixture_id}")
-        if r.status_code == 200 and r.json().get("header"):
-            espn_slug = slug
-            summary = r.json()
+    for r in responses:
+        if isinstance(r, Exception) or r.status_code != 200:
+            continue
+        data = r.json()
+        if data.get("header"):
+            summary = data
             break
 
     if not summary:
