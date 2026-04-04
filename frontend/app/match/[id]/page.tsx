@@ -220,7 +220,7 @@ export default function MatchPage() {
               ? <p className="text-gray-600 text-sm">No cards recorded</p>
               : (
                 <div className="space-y-2">
-                  {data.cards.map((c: any, i: number) => (
+                  {data.cards.filter((c: any) => c.player && c.player !== "Unknown").map((c: any, i: number) => (
                     <div key={i} className="flex items-center gap-3 text-sm">
                       <span className="text-gray-600 font-mono text-xs w-10 flex-shrink-0">{c.minute}</span>
                       <IconCard color={c.card === "Yellow Card" ? "yellow" : "red"} />

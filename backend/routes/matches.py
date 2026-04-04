@@ -265,23 +265,45 @@ async def get_match_analysis(fixture_id: str, slug: str = ""):
             mapped[label] = v
         stats[tn] = mapped
 
-    # Goals and cards from details
+    # Goals and cards from details — collect $refs for missing player names
     goals, cards = [], []
     home_id = str(home_comp.get("team", {}).get("id", ""))
     away_id = str(away_comp.get("team", {}).get("id", ""))
+    _pending_player_refs = []  # list of (ref_url, target_list, index)
+
+    import re as _re
+
+    def _extract_player(athletes, target_list, index):
+        """Return displayName if present, else queue the $ref for async resolution."""
+        if not athletes:
+            return ""
+        a = athletes[0]
+        name = a.get("displayName", "")
+        if name:
+            return name
+        ref = a.get("$ref", "")
+        if ref:
+            _pending_player_refs.append((ref, target_list, index))
+        return ""
+
     for detail in comp.get("details", []):
         minute = detail.get("clock", {}).get("displayValue", "")
         athletes = detail.get("athletesInvolved", [])
-        player = athletes[0].get("displayName", "") if athletes else ""
         team_id = str(detail.get("team", {}).get("id", ""))
         team_name = home_team if team_id == home_id else away_team
         if detail.get("scoringPlay"):
             d = "Own Goal" if detail.get("ownGoal") else ("Penalty" if detail.get("penaltyKick") else "Goal")
-            goals.append({"minute": minute, "team": team_name, "player": player, "detail": d})
+            entry = {"minute": minute, "team": team_name, "player": "", "detail": d}
+            goals.append(entry)
+            entry["player"] = _extract_player(athletes, goals, len(goals) - 1)
         elif detail.get("yellowCard"):
-            cards.append({"minute": minute, "team": team_name, "player": player, "card": "Yellow Card"})
+            entry = {"minute": minute, "team": team_name, "player": "", "card": "Yellow Card"}
+            cards.append(entry)
+            entry["player"] = _extract_player(athletes, cards, len(cards) - 1)
         elif detail.get("redCard"):
-            cards.append({"minute": minute, "team": team_name, "player": player, "card": "Red Card"})
+            entry = {"minute": minute, "team": team_name, "player": "", "card": "Red Card"}
+            cards.append(entry)
+            entry["player"] = _extract_player(athletes, cards, len(cards) - 1)
 
     lineups = {}
     subs = []
@@ -391,7 +413,20 @@ async def get_match_analysis(fixture_id: str, slug: str = ""):
         resolve_missing(lineups[home_team]),
         resolve_missing(lineups[away_team]),
     )
+
+    # Resolve missing player names in goals/cards via $ref
+    if _pending_player_refs:
+        async with httpx.AsyncClient() as client:
+            ref_tasks = [client.get(ref, timeout=6) for ref, _, _ in _pending_player_refs]
+            ref_results = await asyncio.gather(*ref_tasks, return_exceptions=True)
+        for (ref, target_list, idx), r in zip(_pending_player_refs, ref_results):
+            if not isinstance(r, Exception) and r.status_code == 200:
+                name = r.json().get("displayName") or r.json().get("fullName", "")
+                target_list[idx]["player"] = name
     commentary_lines = []
+    # clock_value -> player name for card/goal plays (to backfill missing names from scoreboard)
+    plays_card_map: dict[float, str] = {}
+    plays_goal_map: dict[float, str] = {}
     KEEP_TYPES = {"goal","penalty---scored","own-goal","shot-on-target","shot-off-target",
                   "yellow-card","red-card","substitution","var"}
     if not isinstance(r_plays, Exception) and r_plays.status_code == 200:
@@ -399,12 +434,52 @@ async def get_match_analysis(fixture_id: str, slug: str = ""):
             ptype = play.get("type", {}).get("type", "")
             text = play.get("text", "") or play.get("alternativeText", "")
             clock = play.get("clock", {}).get("displayValue", "")
+            clock_val = float(play.get("clock", {}).get("value", -1))
             team_ref = play.get("team", {}).get("$ref", "")
             team_name = home_team if str(home_team_id) in team_ref else away_team if str(away_team_id) in team_ref else ""
             if ptype in KEEP_TYPES and text:
                 commentary_lines.append(f"{clock} [{team_name}] {text}")
             if play.get("substitution"):
                 subs.append({"minute": clock, "team": team_name, "detail": text})
+            # Build name lookup from shortText e.g. "Aleksandr Golovin Yellow Card"
+            short = play.get("shortText", "")
+            if short and clock_val >= 0:
+                if play.get("yellowCard") or play.get("redCard"):
+                    for suffix in (" Yellow Card", " Red Card"):
+                        if short.endswith(suffix):
+                            plays_card_map[clock_val] = short[: -len(suffix)].strip()
+                            break
+                elif play.get("scoringPlay"):
+                    for suffix in (" Goal", " Penalty - Scored", " Own Goal", " Header"):
+                        if short.endswith(suffix):
+                            plays_goal_map[clock_val] = short[: -len(suffix)].strip()
+                            break
+
+    # Backfill missing player names using plays data (match by clock value within 2s)
+    def find_in_map(clock_val: float, lookup: dict, tol: float = 2.0) -> str:
+        for cv, name in lookup.items():
+            if abs(cv - clock_val) <= tol:
+                return name
+        return ""
+
+    for entry in cards:
+        if not entry.get("player"):
+            # find the original detail clock value — re-scan details
+            for detail in comp.get("details", []):
+                if (detail.get("yellowCard") or detail.get("redCard")) and \
+                   detail.get("clock", {}).get("displayValue", "") == entry["minute"]:
+                    cv = float(detail.get("clock", {}).get("value", -1))
+                    entry["player"] = find_in_map(cv, plays_card_map) or ""
+                    break
+
+    for entry in goals:
+        if not entry.get("player"):
+            for detail in comp.get("details", []):
+                if detail.get("scoringPlay") and \
+                   detail.get("clock", {}).get("displayValue", "") == entry["minute"]:
+                    cv = float(detail.get("clock", {}).get("value", -1))
+                    entry["player"] = find_in_map(cv, plays_goal_map) or ""
+                    break
 
     commentary_block = "\n".join(commentary_lines[:80]) if commentary_lines else "No detailed play data available."
 
@@ -484,6 +559,10 @@ Write:
             pass
 
     data_note = None if (goals or stats) else "Detailed stats not available for this match."
+
+    # Strip events with no identified player
+    cards = [c for c in cards if c.get("player")]
+    goals = [g for g in goals if g.get("player")]
 
     return {
         "match": f"{home_team} vs {away_team}",
