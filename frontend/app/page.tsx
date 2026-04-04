@@ -220,50 +220,55 @@ export default function Home() {
           {matches.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               {matches.map((m, i) => (
-                <div
-                  key={i}
-                  className="bg-[#0f1923] border border-white/10 p-5 rounded-xl shadow-xl shadow-black/40 hover:scale-[1.03] hover:border-white/30 transition-all duration-300"
-                >
-                  <p className="text-xs text-gray-300 mb-2">
-                    {m.league} ·{" "}
-                    {new Date(m.date).toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "short",
-                    })}
-                  </p>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex flex-col flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <img src={m.home_logo} className="w-6 h-6 object-contain flex-shrink-0" />
-                        <span className="text-sm font-medium leading-tight">{m.home}</span>
-                      </div>
-                      {m.home_goals?.length > 0 && (
-                        <div className="mt-1 pl-8 space-y-0.5">
-                          {m.home_goals.map((g: string, j: number) => (
-                            <p key={j} className="text-[11px] text-gray-400 flex items-center gap-1">
-                              <span>⚽</span>{g}
-                            </p>
-                          ))}
-                        </div>
-                      )}
+                <div key={i} className="bg-[#0f1923] border border-white/10 rounded-2xl overflow-hidden shadow-xl shadow-black/40 hover:border-white/20 transition-all duration-300">
+                  <div className="p-4">
+                    {/* League + date */}
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs text-gray-500">{m.league}</span>
+                      <span className="text-xs text-gray-500">
+                        {new Date(m.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                      </span>
                     </div>
-                    <span className="text-lg font-bold tabular-nums px-2 flex-shrink-0">
-                      {m.score.home} – {m.score.away}
-                    </span>
-                    <div className="flex flex-col flex-1 min-w-0 items-end">
-                      <div className="flex items-center gap-2 justify-end">
-                        <span className="text-sm font-medium leading-tight text-right">{m.away}</span>
-                        <img src={m.away_logo} className="w-6 h-6 object-contain flex-shrink-0" />
-                      </div>
-                      {m.away_goals?.length > 0 && (
-                        <div className="mt-1 pr-8 space-y-0.5 text-right">
-                          {m.away_goals.map((g: string, j: number) => (
-                            <p key={j} className="text-[11px] text-gray-400 flex items-center justify-end gap-1">
-                              {g}<span>⚽</span>
-                            </p>
-                          ))}
+                    {/* Teams + score */}
+                    <div className="flex items-start gap-2">
+                      {/* Home */}
+                      <div className="flex flex-col flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <img src={m.home_logo} className="w-6 h-6 object-contain flex-shrink-0" />
+                          <span className="text-xs sm:text-sm font-semibold leading-tight text-gray-300">{m.home}</span>
                         </div>
-                      )}
+                        {m.home_goals?.length > 0 && (
+                          <div className="mt-1 pl-7 space-y-0.5">
+                            {m.home_goals.map((g: string, j: number) => (
+                              <p key={j} className="text-[11px] text-gray-400 flex items-center gap-1">
+                                <span>⚽</span>{g}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      {/* Score */}
+                      <div className="flex-shrink-0 text-center w-16 pt-0.5">
+                        <span className="text-lg font-black tabular-nums text-white">
+                          {m.score.home}–{m.score.away}
+                        </span>
+                      </div>
+                      {/* Away */}
+                      <div className="flex flex-col flex-1 min-w-0 items-end">
+                        <div className="flex items-center gap-1.5 justify-end">
+                          <span className="text-xs sm:text-sm font-semibold leading-tight text-right text-gray-300">{m.away}</span>
+                          <img src={m.away_logo} className="w-6 h-6 object-contain flex-shrink-0" />
+                        </div>
+                        {m.away_goals?.length > 0 && (
+                          <div className="mt-1 pr-7 space-y-0.5 text-right">
+                            {m.away_goals.map((g: string, j: number) => (
+                              <p key={j} className="text-[11px] text-gray-400 flex items-center justify-end gap-1">
+                                {g}<span>⚽</span>
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>

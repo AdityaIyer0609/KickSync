@@ -130,6 +130,29 @@ async def _fetch_all_standings():
     return result
 
 
+BIG_CLUBS = {
+    "manchester city", "liverpool", "arsenal", "chelsea", "manchester united",
+    "tottenham hotspur", "newcastle united", "aston villa",
+    "real madrid", "barcelona", "atletico madrid",
+    "bayern munich", "borussia dortmund", "bayer leverkusen",
+    "juventus", "ac milan", "inter milan", "napoli",
+    "paris saint-germain", "marseille",
+    "ajax", "porto", "benfica",
+}
+
+def _match_popularity(m: dict) -> int:
+    home = m["home"].lower()
+    away = m["away"].lower()
+    score = 0
+    for club in BIG_CLUBS:
+        if club in home: score += 1
+        if club in away: score += 1
+    # Bonus for cup/European matches between big clubs
+    if score >= 2:
+        score += 1
+    return score
+
+
 @router.get("/dashboard/recent-matches")
 async def get_recent_matches():
     cached = _cache_get("recent-matches")
@@ -193,8 +216,15 @@ async def get_recent_matches():
                 }
             })
 
-    all_matches.sort(key=lambda m: m["date"], reverse=True)
-    result = all_matches[:6]
+    from datetime import datetime, timezone, timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=3)
+    recent = [m for m in all_matches if m["date"] and datetime.fromisoformat(m["date"].replace("Z", "+00:00")) >= cutoff]
+    # If we have enough recent big matches use those, otherwise fall back to 7 days
+    if len(recent) < 6:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        recent = [m for m in all_matches if m["date"] and datetime.fromisoformat(m["date"].replace("Z", "+00:00")) >= cutoff]
+    recent.sort(key=lambda m: (_match_popularity(m), m["date"]), reverse=True)
+    result = recent[:6]
     _cache_set("recent-matches", result)
     return result
 
