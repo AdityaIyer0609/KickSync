@@ -164,7 +164,7 @@ export default function MatchesPage() {
               {matches.map((m) => (
                 <div
                   key={m.fixture_id}
-                  onClick={() => router.push(`/match/${m.fixture_id}`)}
+                  onClick={() => router.push(`/match/${m.fixture_id}?slug=${m.espn_slug}`)}
                   className="bg-[#0f1923] hover:bg-white/5 border border-white/10 hover:border-green-500/30 rounded-xl p-4 cursor-pointer transition"
                 >
                   <p className="text-xs text-gray-600 mb-3">

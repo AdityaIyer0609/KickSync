@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -31,11 +31,14 @@ const IconAI = () => (
 export default function MatchPage() {
   const { id } = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams ? useSearchParams() : null;
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API}/match/${id}`)
+    const slug = searchParams?.get("slug") || "";
+    const url = slug ? `${API}/match/${id}?slug=${slug}` : `${API}/match/${id}`;
+    fetch(url)
       .then((r) => r.json())
       .then((d) => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));

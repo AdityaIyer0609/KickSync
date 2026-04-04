@@ -113,7 +113,7 @@ def get_team_matches(team_id: int, season: int = 2024, limit: int = 5, offset: i
 
 
 @router.get("/match/{fixture_id}")
-async def get_match_analysis(fixture_id: str):
+async def get_match_analysis(fixture_id: str, slug: str = ""):
     # Check Neo4j cache first
     try:
         from config import driver
@@ -145,28 +145,33 @@ async def get_match_analysis(fixture_id: str):
     except Exception:
         pass
 
-    # Try all slugs concurrently
-    all_slugs = list(ESPN_LEAGUE_MAP.values()) + [
-        "eng.fa", "eng.league_cup", "esp.copa_del_rey",
-        "ita.coppa_italia", "ger.dfb_pokal", "fra.coupe_de_france",
-        "uefa.europa", "uefa.europa.conf",
-    ]
-
-    async with httpx.AsyncClient() as client:
-        tasks = [
-            client.get(f"{ESPN_BASE}/{slug}/summary?event={fixture_id}", timeout=10)
-            for slug in all_slugs
-        ]
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
-
+    # If slug provided, try it directly first — much faster
     summary = None
-    for r in responses:
-        if isinstance(r, Exception) or r.status_code != 200:
-            continue
-        data = r.json()
-        if data.get("header"):
-            summary = data
-            break
+    if slug:
+        r = requests.get(f"{ESPN_BASE}/{slug}/summary?event={fixture_id}", timeout=10)
+        if r.status_code == 200 and r.json().get("header"):
+            summary = r.json()
+
+    # Fallback: try all slugs concurrently
+    if not summary:
+        all_slugs = list(ESPN_LEAGUE_MAP.values()) + [
+            "eng.fa", "eng.league_cup", "esp.copa_del_rey",
+            "ita.coppa_italia", "ger.dfb_pokal", "fra.coupe_de_france",
+            "uefa.europa", "uefa.europa.conf",
+        ]
+        async with httpx.AsyncClient() as client:
+            tasks = [
+                client.get(f"{ESPN_BASE}/{s}/summary?event={fixture_id}", timeout=10)
+                for s in all_slugs
+            ]
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in responses:
+            if isinstance(r, Exception) or r.status_code != 200:
+                continue
+            data = r.json()
+            if data.get("header"):
+                summary = data
+                break
 
     if not summary:
         return {"error": "Match not found"}
