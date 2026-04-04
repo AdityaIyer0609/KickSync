@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Smooth scrolling performance */
+* {
+  -webkit-font-smoothing: antialiased;
+}
+
+.parallax-bg {
+  background-image: 
+    linear-gradient(to bottom right, rgba(11,15,26,0.7), rgba(15,23,42,0.6), rgba(2,6,23,0.75)),
+    url('/head_photo.png');
+  background-attachment: fixed;
+  background-size: cover;
+  background-position: top center;
+  filter: brightness(1.1) contrast(1.1);
+  position: fixed;
+  inset: 0;
+  z-index: -10;
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* background-attachment: fixed is broken on mobile browsers */
+@media (max-width: 768px) {
+  .parallax-bg {
+    background-attachment: scroll;
+    background-size: auto 100vh;
+    background-position: 20% top;
+  }
+}
+
+@keyframes marquee {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-100%); }
+}
+
+.gallery-outer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.gallery-set {
+  display: flex;
+  flex-shrink: 0;
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+.gallery-scroll-outer {
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.gallery-scroll-outer::-webkit-scrollbar {
+  display: none;
+}
