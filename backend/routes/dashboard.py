@@ -18,14 +18,14 @@ FD_HEADERS = {"X-Auth-Token": API_KEY}
 _cache: dict = {}
 _CACHE_TTL = 10 * 60  # 10 minutes
 
+def _cache_set(key: str, data, ttl: int = _CACHE_TTL):
+    _cache[key] = {"data": data, "ts": time.time(), "ttl": ttl}
+
 def _cache_get(key: str):
     entry = _cache.get(key)
-    if entry and time.time() - entry["ts"] < _CACHE_TTL:
+    if entry and time.time() - entry["ts"] < entry.get("ttl", _CACHE_TTL):
         return entry["data"]
     return None
-
-def _cache_set(key: str, data):
-    _cache[key] = {"data": data, "ts": time.time()}
 
 # Load players CSV once for photo lookups
 _CSV_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "players.csv")
@@ -70,6 +70,66 @@ SPOTLIGHT_PLAYERS = [
 ]
 
 
+ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer"
+ESPN_SLUGS = [
+    {"slug": "eng.1", "name": "Premier League"},
+    {"slug": "esp.1", "name": "La Liga"},
+    {"slug": "ita.1", "name": "Serie A"},
+    {"slug": "ger.1", "name": "Bundesliga"},
+    {"slug": "fra.1", "name": "Ligue 1"},
+    {"slug": "eng.fa", "name": "FA Cup"},
+    {"slug": "eng.league_cup", "name": "League Cup"},
+    {"slug": "esp.copa_del_rey", "name": "Copa del Rey"},
+    {"slug": "ita.coppa_italia", "name": "Coppa Italia"},
+    {"slug": "ger.dfb_pokal", "name": "DFB Pokal"},
+    {"slug": "fra.coupe_de_france", "name": "Coupe de France"},
+    {"slug": "uefa.champions", "name": "Champions League"},
+    {"slug": "uefa.europa", "name": "Europa League"},
+    {"slug": "uefa.europa.conf", "name": "Conference League"},
+]
+
+@router.get("/dashboard/debug-fd")
+async def debug_fd():
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            "https://api.football-data.org/v4/competitions/PL/standings",
+            headers=FD_HEADERS, timeout=10
+        )
+    return {"status": r.status_code, "body": r.text[:500]}
+
+
+ESPN_WEB_BASE = "https://site.web.api.espn.com/apis/v2/sports/soccer"
+ESPN_STANDINGS_SLUGS = [
+    {"slug": "eng.1", "name": "Premier League"},
+    {"slug": "esp.1", "name": "La Liga"},
+    {"slug": "ita.1", "name": "Serie A"},
+    {"slug": "ger.1", "name": "Bundesliga"},
+    {"slug": "fra.1", "name": "Ligue 1"},
+]
+
+async def _fetch_all_standings():
+    cached = _cache_get("espn-standings")
+    if cached is not None:
+        return cached
+    async with httpx.AsyncClient() as client:
+        tasks = [
+            client.get(f"{ESPN_WEB_BASE}/{l['slug']}/standings", timeout=10)
+            for l in ESPN_STANDINGS_SLUGS
+        ]
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+    result = []
+    for i, r in enumerate(responses):
+        if isinstance(r, Exception) or r.status_code != 200:
+            result.append(None)
+            continue
+        entries = []
+        for child in r.json().get("children", []):
+            entries += child.get("standings", {}).get("entries", [])
+        result.append(entries if entries else None)
+    _cache_set("espn-standings", result, ttl=12 * 60 * 60)
+    return result
+
+
 @router.get("/dashboard/recent-matches")
 async def get_recent_matches():
     cached = _cache_get("recent-matches")
@@ -77,11 +137,8 @@ async def get_recent_matches():
         return cached
     async with httpx.AsyncClient() as client:
         tasks = [
-            client.get(
-                f"https://api.football-data.org/v4/competitions/{league['code']}/matches?status=FINISHED&limit=3",
-                headers=FD_HEADERS, timeout=10
-            )
-            for league in TOP5_LEAGUES
+            client.get(f"{ESPN_BASE}/{l['slug']}/scoreboard", timeout=10)
+            for l in ESPN_SLUGS
         ]
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -89,20 +146,50 @@ async def get_recent_matches():
     for i, r in enumerate(responses):
         if isinstance(r, Exception) or r.status_code != 200:
             continue
-        league = TOP5_LEAGUES[i]
-        matches = r.json().get("matches", [])
-        matches.sort(key=lambda m: m["utcDate"], reverse=True)
-        for m in matches[:3]:
+        league_name = ESPN_SLUGS[i]["name"]
+        for event in r.json().get("events", []):
+            comp = event.get("competitions", [{}])[0]
+            status = comp.get("status", {}).get("type", {}).get("state", "")
+            if status != "post":
+                continue
+            competitors = comp.get("competitors", [])
+            if len(competitors) < 2:
+                continue
+            home = next((c for c in competitors if c.get("homeAway") == "home"), competitors[0])
+            away = next((c for c in competitors if c.get("homeAway") == "away"), competitors[1])
+            home_id = str(home.get("team", {}).get("id", ""))
+            away_id = str(away.get("team", {}).get("id", ""))
+
+            goals = {"home": [], "away": []}
+            for detail in comp.get("details", []):
+                if not detail.get("scoringPlay"):
+                    continue
+                minute = detail.get("clock", {}).get("displayValue", "")
+                athletes = detail.get("athletesInvolved", [])
+                scorer = athletes[0].get("shortName", "") if athletes else ""
+                own_goal = detail.get("ownGoal", False)
+                penalty = detail.get("penaltyKick", False)
+                team_id = str(detail.get("team", {}).get("id", ""))
+                label = f"{scorer} {minute}"
+                if own_goal: label += " (OG)"
+                if penalty: label += " (P)"
+                if team_id == home_id:
+                    goals["home"].append(label)
+                elif team_id == away_id:
+                    goals["away"].append(label)
+
             all_matches.append({
-                "date": m["utcDate"],
-                "league": league["name"],
-                "home": m["homeTeam"]["name"],
-                "home_logo": m["homeTeam"].get("crest", ""),
-                "away": m["awayTeam"]["name"],
-                "away_logo": m["awayTeam"].get("crest", ""),
+                "date": event.get("date", ""),
+                "league": league_name,
+                "home": home.get("team", {}).get("displayName", ""),
+                "home_logo": home.get("team", {}).get("logo", ""),
+                "home_goals": goals["home"],
+                "away": away.get("team", {}).get("displayName", ""),
+                "away_logo": away.get("team", {}).get("logo", ""),
+                "away_goals": goals["away"],
                 "score": {
-                    "home": m["score"]["fullTime"]["home"],
-                    "away": m["score"]["fullTime"]["away"]
+                    "home": home.get("score", "0"),
+                    "away": away.get("score", "0"),
                 }
             })
 
@@ -114,46 +201,36 @@ async def get_recent_matches():
 
 @router.get("/dashboard/in-form")
 async def get_in_form_teams():
-    """Get most in-form teams across top 5 leagues — fetched concurrently."""
     cached = _cache_get("in-form")
     if cached is not None:
         return cached
     async with httpx.AsyncClient() as client:
         tasks = [
-            client.get(
-                f"https://api.football-data.org/v4/competitions/{league['code']}/matches?status=FINISHED&limit=20",
-                headers=FD_HEADERS, timeout=10
-            )
-            for league in TOP5_LEAGUES
+            client.get(f"{ESPN_BASE}/{l['slug']}/scoreboard", timeout=10)
+            for l in ESPN_SLUGS
         ]
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
-    all_scored = []
+    team_form: dict = {}
     for i, r in enumerate(responses):
         if isinstance(r, Exception) or r.status_code != 200:
             continue
-        league = TOP5_LEAGUES[i]
-        matches = r.json().get("matches", [])
-        team_results: dict = {}
-        for m in reversed(matches):
-            home = m["homeTeam"]["name"]
-            away = m["awayTeam"]["name"]
-            winner = m["score"].get("winner")
-            for team in [home, away]:
-                if team not in team_results:
-                    team_results[team] = []
-                if len(team_results[team]) < 5:
-                    if (winner == "HOME_TEAM" and team == home) or (winner == "AWAY_TEAM" and team == away):
-                        team_results[team].append("W")
-                    elif winner == "DRAW":
-                        team_results[team].append("D")
-                    else:
-                        team_results[team].append("L")
+        league_name = ESPN_SLUGS[i]["name"]
+        for event in r.json().get("events", []):
+            comp = event.get("competitions", [{}])[0]
+            for c in comp.get("competitors", []):
+                name = c.get("team", {}).get("displayName", "")
+                form = c.get("form", "")  # e.g. "LWLWW"
+                if name and form and name not in team_form:
+                    team_form[name] = {"league": league_name, "form": form[-5:]}
 
-        for team, results in team_results.items():
-            if len(results) >= 3:
-                pts = sum(3 if rv == "W" else 1 if rv == "D" else 0 for rv in results)
-                all_scored.append({"team": team, "league": league["name"], "form": "".join(results), "points": pts})
+    all_scored = []
+    for team, v in team_form.items():
+        form = v["form"]
+        if len(form) < 3:
+            continue
+        pts = sum(3 if r == "W" else 1 if r == "D" else 0 for r in form)
+        all_scored.append({"team": team, "league": v["league"], "form": form, "points": pts})
 
     all_scored.sort(key=lambda x: x["points"], reverse=True)
     result = all_scored[:5]
@@ -167,32 +244,18 @@ async def get_best_defense():
     cached = _cache_get("best-defense")
     if cached is not None:
         return cached
-    async with httpx.AsyncClient() as client:
-        tasks = [
-            client.get(f"https://api.football-data.org/v4/competitions/{league['code']}/standings",
-                      headers=FD_HEADERS, timeout=10)
-            for league in TOP5_LEAGUES
-        ]
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
-
+    standings = await _fetch_all_standings()
     all_teams = []
-    for i, r in enumerate(responses):
-        if isinstance(r, Exception) or r.status_code != 200:
+    for i, entries in enumerate(standings):
+        if not entries:
             continue
-        standings = r.json().get("standings", [])
-        total = next((s for s in standings if s["type"] == "TOTAL"), None)
-        if not total:
-            continue
-        for t in total["table"]:
-            if t["playedGames"] > 0:
-                all_teams.append({
-                    "team": t["team"]["name"],
-                    "league": TOP5_LEAGUES[i]["name"],
-                    "goalsAgainst": t["goalsAgainst"],
-                    "played": t["playedGames"]
-                })
-
-    all_teams = [t for t in all_teams if t["played"] > 0]
+        league_name = ESPN_STANDINGS_SLUGS[i]["name"]
+        for entry in entries:
+            team_name = entry.get("team", {}).get("displayName", "")
+            ga = int(next((s.get("value", 0) for s in entry.get("stats", []) if s["name"] == "pointsAgainst"), 0) or 0)
+            gp = int(next((s.get("value", 0) for s in entry.get("stats", []) if s["name"] == "gamesPlayed"), 0) or 0)
+            if gp > 0:
+                all_teams.append({"team": team_name, "league": league_name, "goalsAgainst": ga})
     all_teams.sort(key=lambda x: x["goalsAgainst"])
     result = all_teams[:5]
     _cache_set("best-defense", result)
@@ -204,31 +267,18 @@ async def get_best_offense():
     cached = _cache_get("best-offense")
     if cached is not None:
         return cached
-    async with httpx.AsyncClient() as client:
-        tasks = [
-            client.get(f"https://api.football-data.org/v4/competitions/{league['code']}/standings",
-                      headers=FD_HEADERS, timeout=10)
-            for league in TOP5_LEAGUES
-        ]
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
-
+    standings = await _fetch_all_standings()
     all_teams = []
-    for i, r in enumerate(responses):
-        if isinstance(r, Exception) or r.status_code != 200:
+    for i, entries in enumerate(standings):
+        if not entries:
             continue
-        standings = r.json().get("standings", [])
-        total = next((s for s in standings if s["type"] == "TOTAL"), None)
-        if not total:
-            continue
-        for t in total["table"]:
-            if t["playedGames"] > 0:
-                all_teams.append({
-                    "team": t["team"]["name"],
-                    "league": TOP5_LEAGUES[i]["name"],
-                    "goalsFor": t["goalsFor"],
-                    "played": t["playedGames"]
-                })
-
+        league_name = ESPN_STANDINGS_SLUGS[i]["name"]
+        for entry in entries:
+            team_name = entry.get("team", {}).get("displayName", "")
+            gf = int(next((s.get("value", 0) for s in entry.get("stats", []) if s["name"] == "pointsFor"), 0) or 0)
+            gp = int(next((s.get("value", 0) for s in entry.get("stats", []) if s["name"] == "gamesPlayed"), 0) or 0)
+            if gp > 0:
+                all_teams.append({"team": team_name, "league": league_name, "goalsFor": gf})
     all_teams.sort(key=lambda x: x["goalsFor"], reverse=True)
     result = all_teams[:5]
     _cache_set("best-offense", result)

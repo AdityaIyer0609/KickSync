@@ -180,7 +180,7 @@ export default function Home() {
               <h2 className="text-2xl font-semibold tracking-tight text-white">Latest News</h2>
               <div className="w-12 h-[2px] bg-gradient-to-r from-green-400 to-transparent mt-2" />
             </div>
-            <Gallery speed="slow" itemWidth={304} height={220}>
+            <Gallery speed="slow" itemWidth={304} height={280}>
               {news.map((article, i) => (
                 <a
                   key={i}
@@ -231,17 +231,39 @@ export default function Home() {
                       month: "short",
                     })}
                   </p>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <img src={m.home_logo} className="w-6 h-6 object-contain flex-shrink-0" />
-                      <span className="text-sm font-medium leading-tight">{m.home}</span>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <img src={m.home_logo} className="w-6 h-6 object-contain flex-shrink-0" />
+                        <span className="text-sm font-medium leading-tight">{m.home}</span>
+                      </div>
+                      {m.home_goals?.length > 0 && (
+                        <div className="mt-1 pl-8 space-y-0.5">
+                          {m.home_goals.map((g: string, j: number) => (
+                            <p key={j} className="text-[11px] text-gray-400 flex items-center gap-1">
+                              <span>⚽</span>{g}
+                            </p>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <span className="text-lg font-bold tabular-nums px-4 flex-shrink-0 text-center min-w-[64px]">
+                    <span className="text-lg font-bold tabular-nums px-2 flex-shrink-0">
                       {m.score.home} – {m.score.away}
                     </span>
-                    <div className="flex items-center gap-2 flex-1 justify-end min-w-0">
-                      <span className="text-sm font-medium text-right leading-tight">{m.away}</span>
-                      <img src={m.away_logo} className="w-6 h-6 object-contain flex-shrink-0" />
+                    <div className="flex flex-col flex-1 min-w-0 items-end">
+                      <div className="flex items-center gap-2 justify-end">
+                        <span className="text-sm font-medium leading-tight text-right">{m.away}</span>
+                        <img src={m.away_logo} className="w-6 h-6 object-contain flex-shrink-0" />
+                      </div>
+                      {m.away_goals?.length > 0 && (
+                        <div className="mt-1 pr-8 space-y-0.5 text-right">
+                          {m.away_goals.map((g: string, j: number) => (
+                            <p key={j} className="text-[11px] text-gray-400 flex items-center justify-end gap-1">
+                              {g}<span>⚽</span>
+                            </p>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
