@@ -113,7 +113,7 @@ def get_team_matches(team_id: int, season: int = 2024, limit: int = 5, offset: i
 
 
 @router.get("/match/{fixture_id}")
-def get_match_analysis(fixture_id: str):
+async def get_match_analysis(fixture_id: str):
     # Check Neo4j cache first
     try:
         from config import driver
@@ -152,15 +152,13 @@ def get_match_analysis(fixture_id: str):
         "uefa.europa", "uefa.europa.conf",
     ]
 
-    async def fetch_all():
-        async with httpx.AsyncClient() as client:
-            tasks = [
-                client.get(f"{ESPN_BASE}/{slug}/summary?event={fixture_id}", timeout=8)
-                for slug in all_slugs
-            ]
-            return await asyncio.gather(*tasks, return_exceptions=True)
+    async with httpx.AsyncClient() as client:
+        tasks = [
+            client.get(f"{ESPN_BASE}/{slug}/summary?event={fixture_id}", timeout=10)
+            for slug in all_slugs
+        ]
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
 
-    responses = asyncio.run(fetch_all())
     summary = None
     for r in responses:
         if isinstance(r, Exception) or r.status_code != 200:
