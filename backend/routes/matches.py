@@ -464,7 +464,6 @@ async def get_match_analysis(fixture_id: str, slug: str = ""):
 
     for entry in cards:
         if not entry.get("player"):
-            # find the original detail clock value — re-scan details
             for detail in comp.get("details", []):
                 if (detail.get("yellowCard") or detail.get("redCard")) and \
                    detail.get("clock", {}).get("displayValue", "") == entry["minute"]:
@@ -480,6 +479,10 @@ async def get_match_analysis(fixture_id: str, slug: str = ""):
                     cv = float(detail.get("clock", {}).get("value", -1))
                     entry["player"] = find_in_map(cv, plays_goal_map) or ""
                     break
+
+    # Drop entries where player is still unknown
+    cards = [c for c in cards if c.get("player")]
+    goals = [g for g in goals if g.get("player")]
 
     commentary_block = "\n".join(commentary_lines[:80]) if commentary_lines else "No detailed play data available."
 

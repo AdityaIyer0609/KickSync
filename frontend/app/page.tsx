@@ -161,14 +161,14 @@ export default function Home() {
       <div className="relative p-4 sm:p-6 pt-20 sm:pt-24 space-y-10">
 
         {/* HEADER */}
-        <div>
-          <div className="flex items-center gap-1 mb-1">
-            <div className="w-12 h-12 sm:w-16 sm:h-16 overflow-hidden flex-shrink-0">
-              <img src="/logo.png" alt="KickSync" className="w-full h-full object-cover scale-150 drop-shadow-[0_0_8px_rgba(0,0,0,0.9)]" />
+        <div className="pl-4 sm:pl-6">
+          <div className="flex items-center gap-3 mb-1">
+            <div className="w-8 h-8 sm:w-8 sm:h-8 overflow-hidden flex-shrink-0">
+              <img src="/logo1.png" alt="KickSync" className="w-full h-full object-cover scale-150 drop-shadow-[0_0_8px_rgba(0,0,0,0.9)]" />
             </div>
             <h1 className="text-3xl sm:text-4xl font-bold drop-shadow-lg">KickSync</h1>
           </div>
-          <p className="text-gray-300 mt-1 pl-4 sm:pl-5 text-sm sm:text-base">
+          <p className="text-gray-300 mt-1 text-sm sm:text-base">
             Where live football data meets AI-driven insights, analysis, and tactical intelligence
           </p>
         </div>

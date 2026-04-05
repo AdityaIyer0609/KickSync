@@ -46,9 +46,9 @@ export default function Navbar() {
     <nav className="fixed top-0 left-0 right-0 z-50 bg-black/30 backdrop-blur-md border-b border-white/10 text-white">
       <div className="px-4 sm:px-6 py-3 flex items-center justify-between">
         {/* Logo */}
-        <div className="flex items-center gap-1 font-bold text-lg tracking-tight">
-          <div className="w-9 h-9 overflow-hidden flex-shrink-0">
-            <img src="/logo.png" alt="KickSync" className="w-full h-full object-cover scale-150" />
+        <div className="flex items-center gap-2 font-bold text-lg tracking-tight">
+          <div className="w-5 h-5 overflow-hidden flex-shrink-0">
+            <img src="/logo1.png" alt="KickSync" className="w-full h-full object-cover scale-150" />
           </div>
           <span>KickSync</span>
         </div>
