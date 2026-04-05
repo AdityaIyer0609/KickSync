@@ -371,6 +371,10 @@ _ESPN_TEAMS_CACHE: list = []
 _ESPN_TEAMS_CACHE_TS: float = 0
 _ESPN_TEAMS_CACHE_TTL = 24 * 60 * 60  # 24 hours
 
+# Roster cache: team_id -> {data, ts}
+_ROSTER_CACHE: dict = {}
+_ROSTER_CACHE_TTL = 60 * 60  # 1 hour
+
 def _get_all_espn_teams() -> list:
     global _ESPN_TEAMS_CACHE, _ESPN_TEAMS_CACHE_TS
     if _ESPN_TEAMS_CACHE and (_time.time() - _ESPN_TEAMS_CACHE_TS) < _ESPN_TEAMS_CACHE_TTL:
@@ -400,6 +404,18 @@ def _get_all_espn_teams() -> list:
     _ESPN_TEAMS_CACHE = all_teams
     _ESPN_TEAMS_CACHE_TS = _time.time()
     return all_teams
+
+
+def _get_roster(espn_base: str, slug: str, team_id: str) -> list:
+    """Fetch roster with 1-hour cache."""
+    key = f"{slug}:{team_id}"
+    entry = _ROSTER_CACHE.get(key)
+    if entry and (_time.time() - entry["ts"]) < _ROSTER_CACHE_TTL:
+        return entry["data"]
+    r = requests.get(f"{espn_base}/{slug}/teams/{team_id}/roster")
+    athletes = r.json().get("athletes", []) if r.status_code == 200 else []
+    _ROSTER_CACHE[key] = {"data": athletes, "ts": _time.time()}
+    return athletes
 
 
 @router.post("/agent")
@@ -933,11 +949,9 @@ def smart_agent(query: str):
         espn_team_id = best["id"]
         espn_slug = best["slug"]
 
-        roster_res = requests.get(f"{ESPN_BASE}/{espn_slug}/teams/{espn_team_id}/roster")
-        if roster_res.status_code != 200:
+        athletes = _get_roster(ESPN_BASE, espn_slug, espn_team_id)
+        if not athletes:
             return {"source": "api", "data": "Could not fetch squad"}
-
-        athletes = roster_res.json().get("athletes", [])
         squad = [
             {"name": p.get("displayName"), "position": p.get("position", {}).get("displayName", "Unknown")}
             for p in athletes

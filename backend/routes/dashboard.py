@@ -158,9 +158,16 @@ async def get_recent_matches():
     cached = _cache_get("recent-matches")
     if cached is not None:
         return cached
+
+    from datetime import datetime, timezone, timedelta
+    today = datetime.now(timezone.utc)
+    # Build date strings for last 7 days to query ESPN with a date range
+    dates = [(today - timedelta(days=i)).strftime("%Y%m%d") for i in range(1, 8)]
+    date_range = f"{dates[-1]}-{dates[0]}"  # e.g. 20260403-20260409
+
     async with httpx.AsyncClient() as client:
         tasks = [
-            client.get(f"{ESPN_BASE}/{l['slug']}/scoreboard", timeout=10)
+            client.get(f"{ESPN_BASE}/{l['slug']}/scoreboard", params={"dates": date_range}, timeout=10)
             for l in ESPN_SLUGS
         ]
         responses = await asyncio.gather(*tasks, return_exceptions=True)
@@ -216,15 +223,8 @@ async def get_recent_matches():
                 }
             })
 
-    from datetime import datetime, timezone, timedelta
-    cutoff = datetime.now(timezone.utc) - timedelta(days=3)
-    recent = [m for m in all_matches if m["date"] and datetime.fromisoformat(m["date"].replace("Z", "+00:00")) >= cutoff]
-    # If we have enough recent big matches use those, otherwise fall back to 7 days
-    if len(recent) < 6:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-        recent = [m for m in all_matches if m["date"] and datetime.fromisoformat(m["date"].replace("Z", "+00:00")) >= cutoff]
-    recent.sort(key=lambda m: (_match_popularity(m), m["date"]), reverse=True)
-    result = recent[:6]
+    all_matches.sort(key=lambda m: (_match_popularity(m), m["date"]), reverse=True)
+    result = all_matches[:6]
     _cache_set("recent-matches", result)
     return result
 
@@ -439,20 +439,33 @@ LIVE_SLUG_NAMES = {
 }
 
 @router.get("/dashboard/live-scores")
-def get_live_scores():
+async def get_live_scores():
+    from datetime import datetime, timezone, timedelta
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y%m%d")
+    date_range = f"{yesterday}-{today}"
+
     results = []
-    for slug in LIVE_SLUGS:
-        try:
-            r = requests.get(
+    async with httpx.AsyncClient() as client:
+        tasks = [
+            client.get(
                 f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
+                params={"dates": date_range},
                 timeout=6
             )
-            if r.status_code != 200:
-                continue
+            for slug in LIVE_SLUGS
+        ]
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for idx, r in enumerate(responses):
+        slug = LIVE_SLUGS[idx]
+        if isinstance(r, Exception) or r.status_code != 200:
+            continue
+        try:
             for event in r.json().get("events", []):
                 comp = event.get("competitions", [{}])[0]
                 status = comp.get("status", {})
-                state = status.get("type", {}).get("state", "")  # pre / in / post
+                state = status.get("type", {}).get("state", "")
                 competitors = comp.get("competitors", [])
                 if len(competitors) < 2:
                     continue
@@ -460,13 +473,11 @@ def get_live_scores():
                 home = next((c for c in competitors if c.get("homeAway") == "home"), competitors[0])
                 away = next((c for c in competitors if c.get("homeAway") == "away"), competitors[1])
 
-                # Stats
                 stats_raw = {}
                 for c in competitors:
                     team_name = c.get("team", {}).get("displayName", "")
                     stats_raw[team_name] = {s["name"]: s.get("displayValue", "—") for s in c.get("statistics", [])}
 
-                # Extract goal scorers from details
                 goals: dict = {"home": [], "away": []}
                 home_id = str(home.get("team", {}).get("id", ""))
                 away_id = str(away.get("team", {}).get("id", ""))
