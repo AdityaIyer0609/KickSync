@@ -16,9 +16,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
       <head>
-        <link rel="icon" type="image/png" href="/logo1.png?v=4" />
-        <link rel="shortcut icon" href="/logo1.png?v=4" />
-        <link rel="apple-touch-icon" href="/logo1.png?v=4" />
+        <link rel="icon" type="image/png" href="/logo2.png?v=5" />
+        <link rel="shortcut icon" href="/logo2.png?v=5" />
+        <link rel="apple-touch-icon" href="/logo2.png?v=5" />
       </head>
       <body className="min-h-screen bg-gray-950 text-white flex flex-col">
         <Navbar />
